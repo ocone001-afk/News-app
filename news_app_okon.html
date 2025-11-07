@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Live News Feed — Created by Okon Emmanuel</title>
+<style>
+  :root{--bg:#0f1724;--card:#0b1220;--muted:#94a3b8;--accent:#ff3333;--glass: rgba(255,255,255,0.03)}
+  html,body{height:100%;margin:0;font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;}
+  body{background:linear-gradient(180deg,#071023 0%, #071827 100%);color:#e6eef8;display:flex;align-items:flex-start;justify-content:center;padding:28px;}
+  .app{width:100%;max-width:980px;}
+  header{display:flex;flex-direction:column;gap:6px;align-items:flex-start;margin-bottom:18px}
+  h1{font-size:22px;margin:0}
+  .creator{color:var(--accent);font-weight:bold;font-style:italic;font-size:14px}
+  .controls{display:flex;gap:8px;align-items:center;margin-top:12px}
+  select,input{background:var(--card);border:1px solid rgba(255,255,255,0.04);color:var(--muted);padding:8px 10px;border-radius:10px;min-width:140px}
+  input[type="search"]{min-width:220px;color:var(--muted)}
+  .feed{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+  @media (max-width:720px){.feed{grid-template-columns:1fr}}
+  .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:12px;border-radius:12px;display:flex;gap:12px;align-items:flex-start;border:1px solid rgba(255,255,255,0.03)}
+  .thumb{width:120px;height:80px;border-radius:8px;flex-shrink:0;background:#0a1220;background-size:cover;background-position:center}
+  .meta{font-size:12px;color:var(--muted);margin-bottom:8px}
+  .title{font-size:15px;margin:0 0 6px 0;color:#e6eef8}
+  .excerpt{font-size:13px;color:#b8c7d9;line-height:1.35}
+  .tag{display:inline-block;padding:6px 8px;border-radius:999px;background:var(--glass);color:var(--muted);font-size:12px;margin-right:6px}
+  footer{margin-top:14px;color:var(--muted);font-size:13px;text-align:center}
+  .footer-credit{margin-top:8px;color:#ff3333;font-weight:bold;font-style:italic}
+  .loader{display:inline-block;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03)}
+  .topbar{display:flex;gap:8px;align-items:center}
+  .small{font-size:12px;color:var(--muted)}
+  .source-badge{background:rgba(255,255,255,0.03);padding:4px 8px;border-radius:999px;font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header>
+    <h1>Live News Feed — Demo</h1>
+    <div class="creator">Created by Okon Emmanuel</div>
+    <div class="small">Fetching headlines from public RSS feeds (client-side)</div>
+    <div class="controls">
+      <div class="topbar">
+        <select id="sourceSelect" title="Source">
+          <option value="https://feeds.bbci.co.uk/news/rss.xml">BBC — Top Stories</option>
+          <option value="http://rss.cnn.com/rss/edition.rss">CNN — Top Stories</option>
+          <option value="http://feeds.reuters.com/reuters/topNews">Reuters — Top News</option>
+          <option value="https://www.aljazeera.com/xml/rss/all.xml">Al Jazeera — All</option>
+        </select>
+        <select id="countSelect" title="Items">
+          <option value="8">8 items</option>
+          <option value="16">16 items</option>
+          <option value="24">24 items</option>
+        </select>
+        <input id="q" type="search" placeholder="Search headlines..." />
+        <button id="refresh">Refresh</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div id="status" class="small"></div>
+    <div id="feed" class="feed" aria-live="polite"></div>
+    <footer>
+      <small class="small">Demo uses <span class="source-badge">rss2json / public RSS</span>. Data served by upstream newsrooms.</small>
+      <div class="footer-credit">Created by Okon Emmanuel</div>
+    </footer>
+  </main>
+</div>
+
+<script>
+(() => {
+  const feedEl = document.getElementById('feed');
+  const statusEl = document.getElementById('status');
+  const sourceSelect = document.getElementById('sourceSelect');
+  const countSelect = document.getElementById('countSelect');
+  const refreshBtn = document.getElementById('refresh');
+  const searchInput = document.getElementById('q');
+
+  function fmtDate(s){
+    try{ const d = new Date(s); return d.toLocaleString(); } catch(e){ return s; }
+  }
+
+  async function fetchFeed(rssUrl, limit=12){
+    statusEl.textContent = 'Loading…';
+    const encoded = encodeURIComponent(rssUrl);
+    const rss2url = `https://api.rss2json.com/v1/api.json?rss_url=${encoded}`;
+    try {
+      const r = await fetch(rss2url);
+      if(!r.ok) throw new Error('rss2json failed: ' + r.status);
+      const j = await r.json();
+      statusEl.textContent = `Loaded ${j.items?.length || 0} items from ${j.feed?.title || 'feed'}.`;
+      return (j.items || []).slice(0, limit).map(item => ({...item, sourceTitle: j.feed?.title || ''}));
+    } catch(e){
+      console.warn('rss2json failed:', e);
+      statusEl.textContent = 'rss2json unavailable — trying CORS-proxy fallback';
+      try {
+        const proxy = 'https://corsproxy.io/?' + encodeURIComponent(rssUrl);
+        const r2 = await fetch(proxy);
+        if(!r2.ok) throw new Error('proxy failed: ' + r2.status);
+        const text = await r2.text();
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(text, 'application/xml');
+        const items = Array.from(xml.querySelectorAll('item')).slice(0, limit).map(it => {
+          const title = it.querySelector('title')?.textContent || '';
+          const link = it.querySelector('link')?.textContent || '';
+          const pubDate = it.querySelector('pubDate')?.textContent || '';
+          const description = it.querySelector('description')?.textContent || '';
+          const enclosure = it.querySelector('enclosure')?.getAttribute('url') || '';
+          return { title, link, pubDate, description, enclosure, sourceTitle: rssUrl };
+        });
+        statusEl.textContent = `Loaded ${items.length} items (fallback).`;
+        return items;
+      } catch(err){
+        statusEl.textContent = 'Failed to fetch feed: ' + err.message;
+        console.error(err);
+        return [];
+      }
+    }
+  }
+
+  function createCard(it){
+    const c = document.createElement('article');
+    c.className = 'card';
+    const thumb = document.createElement('div');
+    thumb.className = 'thumb';
+    const imgUrl = it.enclosure || (it.content && (it.content.match(/<img[^>]+src="([^">]+)"/)||[])[1]) || '';
+    if(imgUrl) thumb.style.backgroundImage = `url(${imgUrl})`;
+    else thumb.style.background = '#08121a';
+    c.appendChild(thumb);
+
+    const body = document.createElement('div');
+    body.style.flex = '1';
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = `<span class="tag">${it.sourceTitle || ''}</span> <span>${fmtDate(it.pubDate || it.pubDate)}</span>`;
+    const title = document.createElement('h3');
+    title.className = 'title';
+    const a = document.createElement('a');
+    a.href = it.link || it.origin || '#';
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.style.color = 'inherit';
+    a.style.textDecoration = 'none';
+    a.innerText = it.title || '(no title)';
+    title.appendChild(a);
+    const excerpt = document.createElement('p');
+    excerpt.className = 'excerpt';
+    const tmp = document.createElement('div');
+    tmp.innerHTML = it.description || it.content || '';
+    const txt = tmp.textContent || tmp.innerText || '';
+    excerpt.innerText = txt.length > 220 ? txt.slice(0,220).trim() + '…' : txt;
+    body.appendChild(meta);
+    body.appendChild(title);
+    body.appendChild(excerpt);
+    c.appendChild(body);
+    return c;
+  }
+
+  async function loadAndRender(){
+    feedEl.innerHTML = '';
+    const rss = sourceSelect.value;
+    const limit = parseInt(countSelect.value,10) || 8;
+    const items = await fetchFeed(rss, limit);
+    const q = (searchInput.value||'').trim().toLowerCase();
+    const filtered = q ? items.filter(it => ((it.title||'')+ ' ' + (it.description||'')).toLowerCase().includes(q)) : items;
+    if(filtered.length === 0){
+      feedEl.innerHTML = '<div class="small">No items found.</div>';
+      return;
+    }
+    for(const it of filtered){
+      const card = createCard(it);
+      feedEl.appendChild(card);
+    }
+  }
+
+  sourceSelect.addEventListener('change', loadAndRender);
+  countSelect.addEventListener('change', loadAndRender);
+  refreshBtn.addEventListener('click', loadAndRender);
+  searchInput.addEventListener('input', () => {
+    clearTimeout(window._qto);
+    window._qto = setTimeout(loadAndRender, 250);
+  });
+
+  loadAndRender();
+})();
+</script>
+</body>
+</html>
